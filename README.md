@@ -75,29 +75,6 @@ GlanceBar refreshes at launch, when cswap's account list changes (switch, alias,
 - **macOS 27 betas 2–4** drop hover events to status items, so the panel won't open on hover there (fixed in beta 5); clicking still works.
 - **The active dot** shows the login of the default Claude Code profile (`~/.claude.json`), which is what `cswap list` reports. Sessions started with `cswap run` don't move it. A `/login` inside Claude Code changes the active account without touching cswap's files, so the dot follows at the next refresh.
 
-## Releases and updates
-
-GlanceBar checks GitHub Releases (`omega123456/GlanceBar`, which must be public) at launch and then every hour while the Mac is in use. When a newer version exists, it asks whether to update now. If you accept, it downloads the zip and installs it over the running copy, but only if the download is signed with the same "GlanceBar Local Signing" certificate. Then it relaunches. The menu has **Automatic Updates** and **Check for Updates…**. Dev builds never update.
-
-To publish a release, run this in Terminal.app with a clean working tree:
-
-```sh
-./scripts/release.sh
-```
-
-It bumps the version in `Info.plist`, writes the release notes to `.github/release-body.md`, runs a release build and the self-test, commits, tags `vX.Y.Z` and pushes. The tag triggers `.github/workflows/release.yml`, which builds on `macos-26`, signs with the same identity and attaches `GlanceBar-X.Y.Z.dmg` (manual install: open it and drag GlanceBar to Applications) and `GlanceBar-X.Y.Z.zip` (used by the updater) to the release. The app is self-signed, so the first launch from a downloaded DMG is blocked by Gatekeeper: allow it once in System Settings → Privacy & Security → **Open Anyway**. A nightly workflow keeps only the newest 5 releases.
-
-One-time repository setup:
-1. Create the public repository `omega123456/GlanceBar` and set it as `origin`.
-2. In Keychain Access, export "GlanceBar Local Signing" (certificate and private key) as a `.p12`. Then:
-   ```sh
-   base64 -i GlanceBar.p12 | gh secret set APPLE_CERTIFICATE
-   gh secret set APPLE_CERTIFICATE_PASSWORD   # the .p12 export password
-   gh secret set KEYCHAIN_PASSWORD            # any random string (temporary CI keychain)
-   gh secret set RELEASE_CLEANUP_TOKEN        # token with contents: write, for the cleanup workflow
-   ```
-   The workflow pins the certificate's SHA-1, so a different certificate fails the release.
-
 ## Event log (diagnostics)
 
 Launch with `--log-events` to append millisecond-timestamped plain-text lines to:
