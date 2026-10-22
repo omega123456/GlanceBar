@@ -201,6 +201,7 @@ enum Usage {
         var accounts: [Account] = []
         for r in rows {
             guard let n = number(r["number"]) else { return .failure(.failed(unreadable)) }
+            if r["disabled"] as? Bool == true { continue }
             let alias = (r["alias"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             accounts.append(Account(number: Int(n), email: r["email"] as? String ?? "", alias: alias,
                                     active: r["active"] as? Bool ?? false, status: r["usageStatus"] as? String ?? "unavailable",

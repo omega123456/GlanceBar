@@ -102,6 +102,8 @@ enum SelfTest {
         check("account without a number is a failed run",
               Usage.decode(list([["email": "a@example.com"]]), at: now) == .failure(.failed(Usage.unreadable)))
         check("zero accounts decode", snapshot([])?.accounts.isEmpty == true)
+        check("disabled accounts are hidden",
+              snapshot([["number": 1, "disabled": true], ["number": 2, "disabled": false], ["number": 3]])?.accounts.map(\.number) == [2, 3])
 
         let minimal = snapshot([["number": 4, "extra": ["x": 1]]])?.accounts.first
         check("missing optionals tolerated", minimal?.email == "" && minimal?.alias == nil && minimal?.active == false
