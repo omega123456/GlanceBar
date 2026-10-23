@@ -1,5 +1,11 @@
 # GlanceBar
 
+
+
+https://github.com/user-attachments/assets/58751045-28ca-4820-ae25-50df62e9b9b2
+
+
+
 The usage of every Claude account managed by `cswap` (claude-swap), at a glance in the macOS 26 menu bar on Apple Silicon:
 
 - **The glance:** one menu bar item with a column per account: its alias (or slot number), a 5-hour bar, a 7-day bar with a pace tick, and the two reset countdowns as tiny text. A dot under the label marks the active account. Bars turn amber at 70 % and red at 90 %.
