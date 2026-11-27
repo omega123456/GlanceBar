@@ -262,13 +262,16 @@ final class Drawn: NSView {
 /// window are exactly the box: the shadow is the window's native one, which never catches clicks, so clicks beside
 /// or below the box reach the app underneath (and close the panel through the outside-click monitor).
 final class PanelView: NSView {
-    /// The artifact's `.panel` is `width: 340px` content-box: 340 + 2 × 6 padding + 2 × 1 border.
-    static let width: CGFloat = 354
-    static let content: CGFloat = 340
+    /// The artifact's `.panel` is 340 pt of content; owner deviation 12 lets it grow to fit its longest line.
+    static let minimumContent: CGFloat = 340
+    static let maximumContent: CGFloat = 640
+    static let chrome: CGFloat = 14
+    static let blockPadding: CGFloat = 16
 
     let effect = NSVisualEffectView()
     let box = Drawn()
     private(set) var panel: Panel?
+    private(set) var content = minimumContent
 
     override var isFlipped: Bool { true }
 
@@ -293,14 +296,16 @@ final class PanelView: NSView {
     func show(_ p: Panel) {
         panel = p
         let s = p.style
+        let content = Self.content(for: p)
+        self.content = content
         box.subviews.forEach { $0.removeFromSuperview() }
         var y: CGFloat = 7 // 1 px border + 6 pt padding
         for (i, c) in p.columns.enumerated() {
             let top: CGFloat = i > 0 ? 1 : 0 // `.acct + .acct` border-top
-            let measured = Self.block(c, nil, top: top)
+            let measured = Self.block(c, nil, top: top, content: content)
             let hot = p.hot == i
             let divider = i > 0 && p.hot != i && p.hot != i - 1 // hidden next to the hot block
-            let view = Drawn(frame: CGRect(x: 7, y: y, width: Self.content, height: measured.height))
+            let view = Drawn(frame: CGRect(x: 7, y: y, width: content, height: measured.height))
             view.paint = { view in
                 let shape = NSBezierPath(roundedRect: view.bounds, xRadius: 6, yRadius: 6)
                 if hot {
@@ -314,7 +319,7 @@ final class PanelView: NSView {
                     CGRect(x: 0, y: 0, width: view.bounds.width, height: 1).fill()
                     NSGraphicsContext.restoreGraphicsState()
                 }
-                Self.block(c, s, top: top)
+                Self.block(c, s, top: top, content: content)
             }
             view.setAccessibilityElement(true)
             view.setAccessibilityRole(.group)
@@ -324,11 +329,11 @@ final class PanelView: NSView {
         }
         if let footer = p.footer {
             let height = 1 + 6 + Self.lineHeight(11) + 4
-            let view = Drawn(frame: CGRect(x: 7, y: y, width: Self.content, height: height))
+            let view = Drawn(frame: CGRect(x: 7, y: y, width: content, height: height))
             view.paint = { _ in
                 s.sep.setFill()
-                CGRect(x: 0, y: 0, width: Self.content, height: 1).fill()
-                Self.text([(footer, Self.font(11), s.dim)], x: 8, top: 7, width: Self.content - 16)
+                CGRect(x: 0, y: 0, width: content, height: 1).fill()
+                Self.text(Self.footerRuns(footer, s), x: 8, top: 7, width: content - Self.blockPadding)
             }
             view.setAccessibilityElement(true)
             view.setAccessibilityRole(.staticText)
@@ -337,7 +342,7 @@ final class PanelView: NSView {
             y += height + 2
         }
         let boxHeight = (y - 2 + 7).rounded(.up) // whole points: the window (exactly the box) can't be fractional
-        setFrameSize(NSSize(width: Self.width, height: boxHeight))
+        setFrameSize(NSSize(width: content + Self.chrome, height: boxHeight))
         box.frame = bounds
         effect.frame = box.frame
         effect.isHidden = s.reduceTransparency // DD-9: solid
@@ -352,6 +357,18 @@ final class PanelView: NSView {
         }
         box.needsDisplay = true
         window?.invalidateShadow() // the native shadow follows the new shape
+    }
+
+    static func content(for panel: Panel) -> CGFloat {
+        let blockWidths = panel.columns.map { column in block(column, nil, top: 0, content: minimumContent).neededWidth }
+        let footerWidth = panel.footer.map { footer in naturalWidth(footerRuns(footer, nil)) } ?? 0
+        let widest = (blockWidths + [footerWidth]).max() ?? 0
+        let fitting = (widest + blockPadding).rounded(.up)
+        return min(max(minimumContent, fitting), maximumContent)
+    }
+
+    private static func footerRuns(_ footer: String, _ style: Style?) -> [(String, NSFont, NSColor?)] {
+        [(footer, font(11), style?.dim)]
     }
 
     // MARK: Text in CSS line boxes (font size × 1.35)
@@ -396,14 +413,26 @@ final class PanelView: NSView {
         return CGSize(width: min(natural, width), height: max(height, lh))
     }
 
+    static func naturalWidth(_ runs: [(String, NSFont, NSColor?)]) -> CGFloat {
+        let uncoloured = runs.map { (string, font, _) in (string, font, nil as NSColor?) }
+        return text(uncoloured, x: 0, top: 0, width: .greatestFiniteMagnitude).width
+    }
+
     // MARK: Account block (the artifact's `.acct`)
 
+    struct BlockSize {
+        var height: CGFloat
+        var neededWidth: CGFloat
+        var texts: [String]
+    }
+
     /// Measures (style nil) or draws one account block: header, then the kind's rows, padding 8 and 4 pt between
-    /// rows. Returns its height and the visible texts (the block's combined accessibility label, NFR-5).
+    /// rows.
     @discardableResult
-    static func block(_ c: Column, _ s: Style?, top: CGFloat) -> (height: CGFloat, texts: [String]) {
-        let inner = content - 16
+    static func block(_ c: Column, _ s: Style?, top: CGFloat, content: CGFloat) -> BlockSize {
+        let inner = content - blockPadding
         var texts: [String] = []
+        var neededWidth = headerWidth(c)
         var y = top + 8
         y += header(c, s, x: 8, top: y, width: inner, texts: &texts)
 
@@ -411,13 +440,15 @@ final class PanelView: NSView {
             y += 4
             texts.append(runs.map(\.0).joined())
             y += text(runs, x: 8 + indent, top: y, width: inner - indent, wrap: wrap).height
+            if !wrap { neededWidth = max(neededWidth, indent + naturalWidth(runs)) }
         }
         func row(_ name: String, _ meter: Meter, _ rest: [(String, NSFont, NSColor?)], tail: [(String, NSFont, NSColor?)] = [],
                  percent: Bool = true) {
             y += 4
             let all = rest.map(\.0).joined() + (tail.isEmpty ? "" : " · " + tail.map(\.0).joined()) // spoken pause
             texts.append(name + (percent ? " \(meter.shown)%" : "") + (all.isEmpty ? "" : ", " + all))
-            y += windowRow(name, meter, rest, tail, s, x: 8, top: y, percent: percent)
+            neededWidth = max(neededWidth, windowRowWidth(rest, tail))
+            y += windowRow(name, meter, rest, tail, s, x: 8, top: y, inner: inner, percent: percent)
         }
         let dim = s?.dim, fg = s?.fg
         let small = font(12), medium = font(12, .medium, digits: true), plain = font(12, digits: true)
@@ -450,7 +481,21 @@ final class PanelView: NSView {
             line([("! " + p.error, font(12, .medium), s?.color(.crit))], wrap: true)
             line([(p.fix, small, dim)], wrap: true)
         }
-        return (y + 8, texts)
+        return BlockSize(height: y + 8, neededWidth: neededWidth, texts: texts)
+    }
+
+    private static func headerWidth(_ column: Column) -> CGFloat {
+        let labelWidth = naturalWidth([(column.label, font(13, .semibold), nil)])
+        let emailSpan = column.email.isEmpty ? 0 : headerGap + naturalWidth([(column.email, font(12), nil)])
+        let chipSpan = column.chip.isEmpty ? 0 : headerGap + chipWidth(column.chip)
+        return labelWidth + emailSpan + chipSpan
+    }
+
+    private static let headerGap: CGFloat = 8
+    private static let chipPadding: CGFloat = 12
+
+    private static func chipWidth(_ chip: String) -> CGFloat {
+        naturalWidth([(chip, font(10.5, .semibold), nil)]) + chipPadding
     }
 
     /// The header (`.ahead`): label 13 pt semibold, email 12 pt dim truncated at the tail, chip; baseline-aligned,
@@ -465,7 +510,7 @@ final class PanelView: NSView {
         let labelWidth = text([(c.label, label, s?.fg)], x: x, top: b - baseline(label), width: width).width
         var right = x + width
         if !c.chip.isEmpty {
-            let w = text([(c.chip, chip, nil)], x: 0, top: 0, width: width).width + 12
+            let w = chipWidth(c.chip)
             right -= w
             if let s {
                 let pill = CGRect(x: right, y: b - 1 - baseline(chip), width: w, height: chipHeight)
@@ -473,9 +518,9 @@ final class PanelView: NSView {
                 NSBezierPath(roundedRect: pill, xRadius: chipHeight / 2, yRadius: chipHeight / 2).fill()
                 text([(c.chip, chip, s.fg)], x: right + 6, top: pill.minY + 1, width: w)
             }
-            right -= 8
+            right -= headerGap
         }
-        let left = x + labelWidth + 8
+        let left = x + labelWidth + headerGap
         if !c.email.isEmpty, right > left {
             text([(c.email, email, s?.dim)], x: left, top: b - baseline(email), width: right - left)
         }
@@ -490,10 +535,20 @@ final class PanelView: NSView {
     static let countdownWidth = ["23h 59m", "6d 23h"].map {
         text([($0, font(12, .medium, digits: true), nil)], x: 0, top: 0, width: 200).width
     }.max()!.rounded(.up)
+    static let percentX: CGFloat = 130
+    static let rowGap: CGFloat = 7
+    static let restX = percentX + percentWidth + rowGap
+    static let tailX = restX + countdownWidth + rowGap
+
+    private static func windowRowWidth(_ rest: [(String, NSFont, NSColor?)], _ tail: [(String, NSFont, NSColor?)]) -> CGFloat {
+        let restEnd = rest.isEmpty ? 0 : restX + naturalWidth(rest)
+        let tailEnd = tail.isEmpty ? 0 : tailX + naturalWidth(tail)
+        return max(restEnd, tailEnd)
+    }
 
     private static func windowRow(_ name: String, _ m: Meter, _ rest: [(String, NSFont, NSColor?)],
                                   _ tail: [(String, NSFont, NSColor?)], _ s: Style?,
-                                  x: CGFloat, top: CGFloat, percent: Bool) -> CGFloat {
+                                  x: CGFloat, top: CGFloat, inner: CGFloat, percent: Bool) -> CGFloat {
         let lh = lineHeight(12)
         guard let s else { return lh }
         text([(name, font(12, digits: true), s.dim)], x: x, top: top, width: 200) // overflows like the artifact's grid cell
@@ -510,12 +565,10 @@ final class PanelView: NSView {
             CGRect(x: bar.minX + 82 * pace, y: bar.minY - 2, width: 1.5, height: 9).fill()
         }
         if percent {
-            text([("\(m.shown)%", font(12, .semibold, digits: true), s.fg)], x: x + 130, top: top, width: percentWidth + 1)
+            text([("\(m.shown)%", font(12, .semibold, digits: true), s.fg)], x: x + percentX, top: top, width: percentWidth + 1)
         }
-        let restX = 130 + percentWidth + 7
-        if !rest.isEmpty { text(rest, x: x + restX, top: top, width: content - 16 - restX) }
-        let tailX = restX + countdownWidth + 7
-        if !tail.isEmpty { text(tail, x: x + tailX, top: top, width: content - 16 - tailX) }
+        if !rest.isEmpty { text(rest, x: x + restX, top: top, width: inner - restX) }
+        if !tail.isEmpty { text(tail, x: x + tailX, top: top, width: inner - tailX) }
         return lh
     }
 }

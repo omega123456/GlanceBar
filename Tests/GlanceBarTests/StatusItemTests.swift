@@ -372,6 +372,27 @@ extension Desktop {
                                          visible: CGRect(x: 1728, y: 0, width: 1512, height: 1050)) == CGRect(x: 1736, y: 944, width: 354, height: 100))
         }
 
+        @Test func panelWidensToFitItsLongestLineUpToTheMaximum() {
+            let darkStyle = Style.current(for: NSAppearance(named: .darkAqua)!)
+            func errorPanel(email: String) -> Panel {
+                var columns = SnapshotTests.columns(failure: .notFound)
+                columns[0].email = email
+                return Panel(columns: columns, footer: nil, hot: nil, style: darkStyle)
+            }
+            let longEmail = "someone.with.a.rather.long.name@subdomain.example.com"
+            let overlongEmail = String(repeating: longEmail, count: 3)
+            let longEmailWidth = PanelView.content(for: errorPanel(email: longEmail))
+
+            #expect(PanelView.content(for: errorPanel(email: "a@example.com")) == PanelView.minimumContent)
+            #expect(longEmailWidth > PanelView.minimumContent)
+            #expect(longEmailWidth < PanelView.maximumContent)
+            #expect(PanelView.content(for: errorPanel(email: overlongEmail)) == PanelView.maximumContent)
+
+            let view = PanelView()
+            view.show(errorPanel(email: longEmail))
+            #expect(view.frame.width == longEmailWidth + PanelView.chrome)
+        }
+
         @Test func fadeSlidesDownIntoPlace() throws {
             let item = item()
             item.handle(mouseUp(.leftMouseUp))
@@ -383,7 +404,7 @@ extension Desktop {
             let open = try #require(h.animations.last)
             #expect(open.startFrame == placed.offsetBy(dx: 0, dy: 4) && open.startAlpha == 0)
             #expect(open.endFrame == placed && open.endAlpha == 1)
-            #expect(panel.frame == placed && panel.frame.width == PanelView.width)
+            #expect(panel.frame == placed && panel.frame.width == item.panelView.content + PanelView.chrome)
 
             item.handle(mouseUp(.leftMouseUp)) // the close fades out moving back up 4 pt
             let close = try #require(h.animations.last)
